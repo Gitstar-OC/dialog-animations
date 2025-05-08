@@ -1,10 +1,10 @@
 "use client";
 import { Suspense } from "react";
 
-import Services from "../services";
+import Services from "@/components/services";
 
 export default function Page() {
-  return;
+  return(
   <Suspense
     fallback={
       <div className="min-h-[200vh] pt-20 flex items-center justify-center">
@@ -14,5 +14,6 @@ export default function Page() {
   >
     <Services />
     <h1> hi</h1>
-  </Suspense>;
+  </Suspense>
+  )
 }
