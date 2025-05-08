@@ -13,5 +13,6 @@ export default function Page() {
     }
   >
     <Services />
+    <h1> hi</h1>
   </Suspense>;
 }
