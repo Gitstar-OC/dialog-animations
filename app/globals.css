@@ -70,6 +70,24 @@ body.modal-open {
   }
 }
 
+body {
+    @apply selection:bg-blue-500/50
+}
+
+::-webkit-scrollbar {
+    width: 8px;
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #e4d9ff; 
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #444;
+}
+
 @layer base {
   * {
     @apply border-border;
