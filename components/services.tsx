@@ -1,15 +1,42 @@
 "use client"
 
-import { useRef, useState, useEffect } from "react"
+import type React from "react"
+
+import { useRef, useState, useEffect, Suspense, useCallback } from "react"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { CardData } from "@/lib/card-data"
-import { Card } from "@/components/services/card"
-import { Header } from "@/components/core/header"
+import { Card } from "./card"
+import Header from "@/components/core/header"
 import { ChevronLeft, ChevronRight, X } from "lucide-react"
 import { AnimatePresence, motion } from "motion/react"
 import Image from "next/image"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import {useOnClickOutside} from "usehooks-ts"
+import { useOnClickOutside } from "usehooks-ts"
+
+function SearchParamsHandler({
+  setSelectedCard,
+  setIsDialogOpen,
+  isDialogOpen,
+}: {
+  setSelectedCard: React.Dispatch<React.SetStateAction<(typeof CardData)[0] | null>>
+  setIsDialogOpen: React.Dispatch<React.SetStateAction<boolean>>
+  isDialogOpen: boolean
+}) {
+  const searchParams = useSearchParams()
+
+  useEffect(() => {
+    const modal = searchParams.get("modal")
+    if (modal && !isDialogOpen) {
+      const card = CardData.find((card) => card.title.toLowerCase() === modal)
+      if (card) {
+        setSelectedCard(card)
+        setIsDialogOpen(true)
+      }
+    }
+  }, [searchParams, isDialogOpen, setSelectedCard, setIsDialogOpen])
+
+  return null
+}
 
 export default function Services() {
   const router = useRouter()
@@ -23,51 +50,60 @@ export default function Services() {
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [isAnimating, setIsAnimating] = useState(false)
   const [isOverflowAuto, setIsOverflowAuto] = useState(true)
-  const scrollPositionRef = useRef(0);
-  
+
+  const closeDialog = useCallback(() => {
+    if (isAnimating) return
+
+    setIsAnimating(true)
+    setIsDialogOpen(false)
+    router.replace(pathname, { scroll: false })
+
+    // Don't change overflow until animation completes
+    setTimeout(() => {
+      setIsOverflowAuto(true)
+      setIsAnimating(false)
+      setSelectedCard(null)
+    }, 300) // Match this with animation duration
+  }, [isAnimating, pathname, router])
+
   useEffect(() => {
-    if (typeof document !== 'undefined') {
+    if (typeof document !== "undefined") {
       if (!isOverflowAuto) {
-        // Save scroll position before locking
-        scrollPositionRef.current = window.scrollY;
-        
-        // Add a class to the body instead of directly modifying styles
-        document.body.classList.add('modal-open');
-        
-        // Prevent scrolling with fixed positioning that maintains the scroll position visually
-        document.body.style.position = 'fixed';
-        document.body.style.top = `-${scrollPositionRef.current}px`;
-        document.body.style.width = '100%';
+        document.body.style.overflow = "hidden"
       } else {
-        // Restore scrolling
-        document.body.classList.remove('modal-open');
-        document.body.style.position = '';
-        document.body.style.top = '';
-        document.body.style.width = '';
-        
-        // Restore scroll position
-        window.scrollTo(0, scrollPositionRef.current);
+        document.body.style.overflow = "auto"
       }
     }
-    
+
     return () => {
-      // Cleanup on unmount
-      if (typeof document !== 'undefined') {
-        document.body.classList.remove('modal-open');
-        document.body.style.position = '';
-        document.body.style.top = '';
-        document.body.style.width = '';
-        window.scrollTo(0, scrollPositionRef.current);
+      if (typeof document !== "undefined") {
+        document.body.style.overflow = "auto"
       }
     }
-  }, [isOverflowAuto]);
+  }, [isOverflowAuto])
 
-
-  useOnClickOutside(modalRef, () => {
-    if (isDialogOpen && !isAnimating) {   
+  // Fix for the type error
+  useOnClickOutside(
+    modalRef as React.RefObject<HTMLElement>,
+    () => {
+      if (isDialogOpen && !isAnimating) {
         closeDialog()
+      }
+    },
+    "mousedown",
+  )
+
+  // Fix for the missing dependency warning
+  useEffect(() => {
+    const handleEscKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && isDialogOpen && !isAnimating) {
+        closeDialog()
+      }
     }
-  }, "mousedown")
+
+    window.addEventListener("keydown", handleEscKey)
+    return () => window.removeEventListener("keydown", handleEscKey)
+  }, [isDialogOpen, isAnimating, closeDialog]) // Added closeDialog as dependency
 
   useEffect(() => {
     const modal = searchParams.get("modal")
@@ -96,30 +132,6 @@ export default function Services() {
     }, 500)
   }
 
-  const closeDialog = () => {
-    if (isAnimating) return
-
-    setIsAnimating(true)
-    setIsDialogOpen(false)
-    router.replace(pathname, { scroll: false })
-    setIsOverflowAuto(true)
-    setTimeout(() => {
-      setIsAnimating(false)
-      setSelectedCard(null)
-    }, 500)
-  }
-
-  useEffect(() => {
-    const handleEscKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isDialogOpen && !isAnimating) {
-        closeDialog()
-      }
-    }
-
-    window.addEventListener("keydown", handleEscKey)
-    return () => window.removeEventListener("keydown", handleEscKey)
-  }, [isDialogOpen, isAnimating])
-
   const checkScrollPosition = () => {
     if (scrollContainerRef.current) {
       const { scrollLeft, scrollWidth, clientWidth } = scrollContainerRef.current
@@ -145,13 +157,20 @@ export default function Services() {
   }, [])
 
   return (
-    <div
-      className="min-h-[200vh] pt-20"
+    <section
+      className="min-h-screen pt-10"
       style={{
         background:
           "linear-gradient(180deg, rgba(226, 238, 255, 0.35) 0%, #F8FBFF 46.63%, rgba(226, 238, 255, 0.35) 100%)",
       }}
     >
+      <Suspense fallback={null}>
+        <SearchParamsHandler
+          setSelectedCard={setSelectedCard}
+          setIsDialogOpen={setIsDialogOpen}
+          isDialogOpen={isDialogOpen}
+        />
+      </Suspense>
       <Header
         title="Your Brand, Amplified"
         className="gap-3"
@@ -161,21 +180,29 @@ export default function Services() {
       <div className="py-12">
         <div
           ref={scrollContainerRef}
-          className="flex overflow-auto scroll-smooth gap-4 pb-8 pr-8 pl-8 md:pr-20 md:pl-20 hide-scrollbar"
+          className="flex overflow-auto scroll-smooth pl-16 pr-16 gap-4 pb-8 snap-x md:snap-none snap-mandatory"
           style={{
             scrollbarWidth: "none",
             msOverflowStyle: "none",
+            WebkitOverflowScrolling: "touch",
+            // paddingLeft: "4rem",
+            // paddingRight: "4rem",
           }}
         >
           {CardData.map((card, index) => (
-            <Card key={index} card={card} index={index} openDialog={openDialog} />
+            <div key={index} className="snap-center shrink-0">
+              <Card card={card} index={index} openDialog={openDialog} />
+            </div>
           ))}
         </div>
         <div className="flex justify-center gap-4 mt-4">
           <button
             onClick={() => {
               if (scrollContainerRef.current) {
-                scrollContainerRef.current.scrollBy({ left: -325, behavior: "smooth" })
+                scrollContainerRef.current.scrollBy({
+                  left: -325,
+                  behavior: "smooth",
+                })
               }
             }}
             className={`w-10 h-10 rounded-full cursor-pointer border border-gray-300 flex items-center justify-center ${
@@ -189,7 +216,10 @@ export default function Services() {
           <button
             onClick={() => {
               if (scrollContainerRef.current) {
-                scrollContainerRef.current.scrollBy({ left: 325, behavior: "smooth" })
+                scrollContainerRef.current.scrollBy({
+                  left: 325,
+                  behavior: "smooth",
+                })
               }
             }}
             className={`w-10 h-10 rounded-full cursor-pointer border border-gray-300 flex items-center justify-center ${
@@ -204,7 +234,7 @@ export default function Services() {
       </div>
 
       {/* Dialog */}
-      <AnimatePresence>
+      <AnimatePresence mode="wait">
         {isDialogOpen && selectedCard && (
           <div className="fixed inset-0 z-50 overflow-hidden">
             <motion.div
@@ -226,6 +256,7 @@ export default function Services() {
                   type: "spring",
                   stiffness: 300,
                   damping: 30,
+                  layout: { duration: 0.3 },
                 }}
               >
                 {/* Close button */}
@@ -280,6 +311,6 @@ export default function Services() {
           </div>
         )}
       </AnimatePresence>
-    </div>
+    </section>
   )
 }
