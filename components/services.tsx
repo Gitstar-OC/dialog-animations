@@ -1,19 +1,18 @@
 "use client"
 
 import type React from "react"
-
-import { useRef, useState, useEffect, Suspense, useCallback, useMemo } from "react"
+import { useRef, useState, useEffect, Suspense } from "react"
 import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { CardData } from "@/lib/card-data"
 import { Card } from "@/components/services/card"
 import { Header } from "@/components/core/header"
 import { ChevronLeft, ChevronRight, X } from "lucide-react"
-import { AnimatePresence, motion, useReducedMotion } from "motion/react"
+import { AnimatePresence, motion } from "motion/react"
 import Image from "next/image"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useOnClickOutside } from "usehooks-ts"
 
-// Separate component for search params handling to avoid re-renders
+// This component handles URL synchronization
 function SearchParamsHandler({
   setSelectedCard,
   setIsDialogOpen,
@@ -39,118 +38,6 @@ function SearchParamsHandler({
   return null
 }
 
-// Separate modal component to reduce main component complexity
-function CardModal({
-  selectedCard,
-  isDialogOpen,
-  closeDialog,
-  modalRef,
-}: {
-  selectedCard: (typeof CardData)[0] | null
-  isDialogOpen: boolean
-  closeDialog: () => void
-  modalRef: React.RefObject<HTMLDivElement>
-}) {
-  const prefersReducedMotion = useReducedMotion()
-
-  // Optimize animation settings based on device capability
-  const animationSettings = useMemo(
-    () => ({
-      type: "spring",
-      stiffness: prefersReducedMotion ? 500 : 400,
-      damping: prefersReducedMotion ? 40 : 30,
-      duration: prefersReducedMotion ? 0.15 : 0.2,
-    }),
-    [prefersReducedMotion],
-  )
-
-  if (!selectedCard) return null
-
-  return (
-    <div className="fixed inset-0 z-50 overflow-hidden">
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="absolute inset-0 bg-[#fcfcfc]"
-        onClick={closeDialog}
-        transition={{ duration: 0.15 }}
-      />
-
-      <div className="absolute inset-x-0 bottom-0 flex justify-center">
-        <motion.div
-          layoutId={`card-${selectedCard.title}`}
-          ref={modalRef}
-          className="relative bg-white rounded-t-3xl max-w-3xl w-full md:mx-4 mx-0 h-[95vh] z-10 shadow-xl"
-          onClick={(e) => e.stopPropagation()}
-          transition={{
-            ...animationSettings,
-            layout: { duration: animationSettings.duration },
-          }}
-          style={{
-            willChange: "transform, opacity",
-            transform: "translateZ(0)",
-            backfaceVisibility: "hidden",
-            perspective: 1000,
-          }}
-        >
-          {/* Close button */}
-          <button
-            onClick={closeDialog}
-            className="absolute top-4 right-4 z-50 bg-white rounded-full p-2 hover:bg-white/90 transition-colors"
-            aria-label="Close dialog"
-          >
-            <X className="w-5 h-5" />
-          </button>
-
-          {/* Content container */}
-          <ScrollArea className="h-full rounded-t-3xl">
-            <div className="p-8">
-              {/* Image with white mask overlay */}
-              <motion.div
-                layoutId={`image-container-${selectedCard.title}`}
-                className="relative w-full h-[250px] mb-6 rounded-xl overflow-hidden"
-                style={{ willChange: "transform" }}
-              >
-                <Image
-                  src={selectedCard.image || "/placeholder.svg"}
-                  alt={selectedCard.title}
-                  fill
-                  priority
-                  sizes="(max-width: 768px) 100vw, 800px"
-                  className="object-cover"
-                />
-                {/* White mask overlay */}
-                <div className="absolute inset-0 bg-white/20"></div>
-              </motion.div>
-
-              {/* Text content */}
-              <motion.h2
-                layoutId={`title-${selectedCard.title}`}
-                className="text-[38px]/[1.1] font-medium text-black mb-6"
-              >
-                {selectedCard.title}
-              </motion.h2>
-
-              <div className="space-y-6">
-                <motion.div layoutId={`description-${selectedCard.title}`} className="hidden">
-                  {selectedCard.description.substring(0, 70)}
-                </motion.div>
-
-                {selectedCard.description.split("\n\n").map((paragraph, index) => (
-                  <p key={index} className="text-[18px]/[1.4] text-black">
-                    {paragraph}
-                  </p>
-                ))}
-              </div>
-            </div>
-          </ScrollArea>
-        </motion.div>
-      </div>
-    </div>
-  )
-}
-
 export default function Services() {
   const router = useRouter()
   const pathname = usePathname()
@@ -160,261 +47,159 @@ export default function Services() {
   const [canScrollRight, setCanScrollRight] = useState(true)
   const [selectedCard, setSelectedCard] = useState<(typeof CardData)[0] | null>(null)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
-  const [isAnimating, setIsAnimating] = useState(false)
-  const [isOverflowAuto, setIsOverflowAuto] = useState(true)
-  const prefersReducedMotion = useReducedMotion()
 
-  // Memoize scroll handlers to prevent unnecessary re-renders
-  const scrollLeft = useCallback(() => {
-    if (scrollContainerRef.current) {
-      scrollContainerRef.current.scrollBy({
-        left: -325,
-        behavior: prefersReducedMotion ? "auto" : "smooth",
-      })
+  // Track if we're in the process of opening or closing
+  const [isClosing, setIsClosing] = useState(false)
+
+  // Reference to store the original body overflow style
+  const originalBodyStyle = useRef({
+    overflow: "",
+    paddingRight: "",
+  })
+
+  // Function to lock body scroll
+  const lockBodyScroll = () => {
+    // Store original values
+    originalBodyStyle.current = {
+      overflow: document.body.style.overflow,
+      paddingRight: document.body.style.paddingRight,
     }
-  }, [prefersReducedMotion])
 
-  const scrollRight = useCallback(() => {
-    if (scrollContainerRef.current) {
-      scrollContainerRef.current.scrollBy({
-        left: 325,
-        behavior: prefersReducedMotion ? "auto" : "smooth",
-      })
-    }
-  }, [prefersReducedMotion])
+    // Calculate scrollbar width to prevent layout shift
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth
 
-  // Optimized close dialog function with immediate response
-  const closeDialog = useCallback(() => {
-    if (isAnimating) return
+    // Apply styles to lock scroll
+    document.body.style.overflow = "hidden"
+    document.body.style.paddingRight = `${scrollbarWidth}px`
+  }
 
-    // Immediately start closing
-    setIsDialogOpen(false)
+  // Function to unlock body scroll
+  const unlockBodyScroll = () => {
+    // Restore original styles
+    document.body.style.overflow = originalBodyStyle.current.overflow
+    document.body.style.paddingRight = originalBodyStyle.current.paddingRight
+  }
+
+  // Handle opening a card
+  const openDialog = (card: (typeof CardData)[0]) => {
+    if (isClosing) return
+
+    // Set the selected card first
+    setSelectedCard(card)
+
+    // Lock scroll before animation starts
+    lockBodyScroll()
+
+    // Update URL and open dialog
+    router.replace(`${pathname}?modal=${card.title.toLowerCase()}`, {
+      scroll: false,
+    })
+
+    // Set dialog to open
+    setIsDialogOpen(true)
+  }
+
+  // Handle closing the dialog
+  const closeDialog = () => {
+    if (isClosing) return
+
+    // Set closing state to prevent multiple clicks
+    setIsClosing(true)
+
+    // Update URL immediately
     router.replace(pathname, { scroll: false })
 
-    // Use requestAnimationFrame for smoother animation timing
-    requestAnimationFrame(() => {
-      setIsAnimating(true)
+    // Start closing animation
+    setIsDialogOpen(false)
 
-      // Reset states after animation completes
-      const timer = setTimeout(
-        () => {
-          setIsOverflowAuto(true)
-          setIsAnimating(false)
-          setSelectedCard(null)
-        },
-        prefersReducedMotion ? 100 : 180,
-      ) // Shorter duration for reduced motion preference
+    // After animation completes, clean up
+    setTimeout(() => {
+      unlockBodyScroll()
+      setSelectedCard(null)
+      setIsClosing(false)
+    }, 200) // Match this with animation duration
+  }
 
-      return () => clearTimeout(timer)
-    })
-  }, [isAnimating, pathname, router, prefersReducedMotion])
-
-  // Optimized body overflow handling
-  useEffect(() => {
-    if (typeof document !== "undefined") {
-      // Store original overflow and position
-      const originalOverflow = document.body.style.overflow
-      const originalPosition = document.body.style.position
-      const originalWidth = document.body.style.width
-      const originalTop = document.body.style.top
-
-      if (!isOverflowAuto) {
-        // Save current scroll position
-        const scrollY = window.scrollY
-        document.body.style.overflow = "hidden"
-        document.body.style.position = "fixed"
-        document.body.style.width = "100%"
-        document.body.style.top = `-${scrollY}px`
-      } else {
-        // Restore scroll position if we have it
-        const scrollY = document.body.style.top
-        document.body.style.overflow = originalOverflow
-        document.body.style.position = originalPosition
-        document.body.style.width = originalWidth
-        document.body.style.top = originalTop
-
-        if (scrollY) {
-          window.scrollTo(0, Number.parseInt(scrollY || "0", 10) * -1)
-        }
-      }
-    }
-
-    return () => {
-      if (typeof document !== "undefined") {
-        document.body.style.overflow = ""
-        document.body.style.position = ""
-        document.body.style.width = ""
-        document.body.style.top = ""
-      }
-    }
-  }, [isOverflowAuto])
-
-  // Click outside handler
+  // Handle click outside
   useOnClickOutside(
     modalRef as React.RefObject<HTMLElement>,
     () => {
-      if (isDialogOpen && !isAnimating) {
+      if (isDialogOpen && !isClosing) {
         closeDialog()
       }
     },
     "mousedown",
   )
 
-  // Keyboard handler
+  // Handle escape key
   useEffect(() => {
     const handleEscKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isDialogOpen && !isAnimating) {
+      if (e.key === "Escape" && isDialogOpen && !isClosing) {
         closeDialog()
       }
     }
 
     window.addEventListener("keydown", handleEscKey)
     return () => window.removeEventListener("keydown", handleEscKey)
-  }, [isDialogOpen, isAnimating, closeDialog])
+  }, [isDialogOpen, isClosing])
 
-  // URL handling
+  // Handle URL changes
   useEffect(() => {
-    const handleURLChange = () => {
-      const searchParams = new URLSearchParams(window.location.search)
-      const modal = searchParams.get("modal")
+    const searchParams = new URLSearchParams(window.location.search)
+    const modal = searchParams.get("modal")
 
-      if (modal && !isDialogOpen) {
-        const card = CardData.find((card) => card.title.toLowerCase() === modal)
-        if (card) {
-          setSelectedCard(card)
-          setIsDialogOpen(true)
-          setIsOverflowAuto(false)
-        }
-      } else if (!modal && isDialogOpen) {
-        closeDialog()
+    if (modal && !isDialogOpen && !isClosing) {
+      const card = CardData.find((card) => card.title.toLowerCase() === modal)
+      if (card) {
+        setSelectedCard(card)
+        lockBodyScroll()
+        setIsDialogOpen(true)
       }
     }
+  }, [isDialogOpen, isClosing])
 
-    handleURLChange()
-    window.addEventListener("popstate", handleURLChange)
-
-    return () => {
-      window.removeEventListener("popstate", handleURLChange)
-    }
-  }, [isDialogOpen, closeDialog])
-
-  // Open dialog with optimized performance
-  const openDialog = useCallback(
-    (card: (typeof CardData)[0]) => {
-      if (isAnimating) return
-
-      // Use requestAnimationFrame for smoother animation timing
-      requestAnimationFrame(() => {
-        setIsAnimating(true)
-        setSelectedCard(card)
-        setIsDialogOpen(true)
-        setIsOverflowAuto(false)
-
-        router.replace(`${pathname}?modal=${card.title.toLowerCase()}`, {
-          scroll: false,
-        })
-
-        const timer = setTimeout(
-          () => {
-            setIsAnimating(false)
-          },
-          prefersReducedMotion ? 200 : 300,
-        )
-
-        return () => clearTimeout(timer)
-      })
-    },
-    [isAnimating, pathname, router, prefersReducedMotion],
-  )
-
-  // Optimized scroll position checking with IntersectionObserver
+  // Handle scroll position checking
   useEffect(() => {
     const checkScrollPosition = () => {
       if (scrollContainerRef.current) {
         const { scrollLeft, scrollWidth, clientWidth } = scrollContainerRef.current
-        setCanScrollLeft(scrollLeft > 5) // Small threshold to avoid flickering
-        setCanScrollRight(scrollLeft + clientWidth < scrollWidth - 5)
+        setCanScrollLeft(scrollLeft > 0)
+        setCanScrollRight(scrollLeft + clientWidth < scrollWidth - 1)
       }
     }
 
-    // Initial check
     checkScrollPosition()
-
-    // Throttled scroll handler
-    let scrollTimeout: NodeJS.Timeout
-    const handleScroll = () => {
-      if (scrollTimeout) clearTimeout(scrollTimeout)
-      scrollTimeout = setTimeout(checkScrollPosition, 100)
-    }
 
     const scrollContainer = scrollContainerRef.current
     if (scrollContainer) {
-      scrollContainer.addEventListener("scroll", handleScroll, { passive: true })
-
-      // Also check on resize
-      window.addEventListener("resize", checkScrollPosition, { passive: true })
+      scrollContainer.addEventListener("scroll", checkScrollPosition)
     }
 
     return () => {
       if (scrollContainer) {
-        scrollContainer.removeEventListener("scroll", handleScroll)
+        scrollContainer.removeEventListener("scroll", checkScrollPosition)
       }
-      window.removeEventListener("resize", checkScrollPosition)
-      if (scrollTimeout) clearTimeout(scrollTimeout)
     }
   }, [])
 
-  // Touch gesture support for mobile
-  useEffect(() => {
-    if (!modalRef.current || !isDialogOpen) return
-
-    let startY = 0
-    let currentY = 0
-    const threshold = 100 // Minimum distance to trigger close
-
-    const handleTouchStart = (e: TouchEvent) => {
-      startY = e.touches[0].clientY
+  // Scroll handlers
+  const handleScrollLeft = () => {
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollBy({
+        left: -325,
+        behavior: "smooth",
+      })
     }
+  }
 
-    const handleTouchMove = (e: TouchEvent) => {
-      currentY = e.touches[0].clientY
-      const distance = currentY - startY
-
-      // Only allow downward swipes
-      if (distance > 0) {
-        e.preventDefault()
-
-        // Apply transform to follow finger
-        if (modalRef.current) {
-          modalRef.current.style.transform = `translateY(${Math.min(distance, 200)}px)`
-          modalRef.current.style.transition = "none"
-        }
-      }
+  const handleScrollRight = () => {
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollBy({
+        left: 325,
+        behavior: "smooth",
+      })
     }
-
-    const handleTouchEnd = () => {
-      if (modalRef.current) {
-        modalRef.current.style.transition = "transform 0.2s ease-out"
-        modalRef.current.style.transform = ""
-      }
-
-      const distance = currentY - startY
-      if (distance > threshold) {
-        closeDialog()
-      }
-    }
-
-    const modal = modalRef.current
-    modal.addEventListener("touchstart", handleTouchStart, { passive: true })
-    modal.addEventListener("touchmove", handleTouchMove, { passive: false })
-    modal.addEventListener("touchend", handleTouchEnd, { passive: true })
-
-    return () => {
-      modal.removeEventListener("touchstart", handleTouchStart)
-      modal.removeEventListener("touchmove", handleTouchMove)
-      modal.removeEventListener("touchend", handleTouchEnd)
-    }
-  }, [isDialogOpen, closeDialog])
+  }
 
   return (
     <section
@@ -446,7 +231,6 @@ export default function Services() {
             msOverflowStyle: "none",
             WebkitOverflowScrolling: "touch",
           }}
-          aria-label="Services carousel"
         >
           {CardData.map((card, index) => (
             <div key={index} className="snap-center shrink-0">
@@ -456,7 +240,7 @@ export default function Services() {
         </div>
         <div className="flex justify-center gap-4 mt-4">
           <button
-            onClick={scrollLeft}
+            onClick={handleScrollLeft}
             className={`w-10 h-10 rounded-full cursor-pointer border border-gray-300 flex items-center justify-center ${
               canScrollLeft ? "bg-[#fff] hover:bg-[#eee]" : "bg-transparent cursor-default"
             }`}
@@ -466,7 +250,7 @@ export default function Services() {
             <ChevronLeft className={`w-6 h-6 ${!canScrollLeft ? "text-gray-500" : ""}`} style={{ strokeWidth: 2 }} />
           </button>
           <button
-            onClick={scrollRight}
+            onClick={handleScrollRight}
             className={`w-10 h-10 rounded-full cursor-pointer border border-gray-300 flex items-center justify-center ${
               canScrollRight ? "bg-[#fff] hover:bg-[#eee]" : "bg-transparent cursor-default"
             }`}
@@ -478,15 +262,100 @@ export default function Services() {
         </div>
       </div>
 
-      {/* Dialog - Using AnimatePresence with optimized settings */}
+      {/* Modal Dialog */}
       <AnimatePresence mode="wait" initial={false}>
         {isDialogOpen && selectedCard && (
-          <CardModal
-            selectedCard={selectedCard}
-            isDialogOpen={isDialogOpen}
-            closeDialog={closeDialog}
-            modalRef={modalRef}
-          />
+          <div className="fixed inset-0 z-50 overflow-hidden">
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-[#fcfcfc]"
+              onClick={closeDialog}
+              transition={{ duration: 0.2 }}
+            />
+
+            {/* Modal Container */}
+            <div className="absolute inset-x-0 bottom-0 flex justify-center">
+              <motion.div
+                layoutId={`card-${selectedCard.title}`}
+                ref={modalRef}
+                className="relative bg-white rounded-t-3xl max-w-3xl w-full md:mx-4 mx-0 h-[95vh] z-10 shadow-xl"
+                onClick={(e) => e.stopPropagation()}
+                transition={{
+                  type: "spring",
+                  stiffness: 300,
+                  damping: 30,
+                  layout: { duration: 0.2 },
+                }}
+                style={{
+                  willChange: "transform",
+                  transform: "translateZ(0)",
+                }}
+              >
+                {/* Close button with direct DOM manipulation for instant feedback */}
+                <button
+                  onClick={(e) => {
+                    // Provide immediate visual feedback
+                    const target = e.currentTarget
+                    target.style.transform = "scale(0.95)"
+
+                    // Reset after a short delay
+                    setTimeout(() => {
+                      target.style.transform = ""
+                    }, 100)
+
+                    closeDialog()
+                  }}
+                  className="absolute top-4 right-4 z-50 bg-white rounded-full p-2 hover:bg-white/90 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+
+                {/* Content container */}
+                <ScrollArea className="h-full rounded-t-3xl">
+                  <div className="p-8">
+                    {/* Image with white mask overlay */}
+                    <motion.div
+                      layoutId={`image-container-${selectedCard.title}`}
+                      className="relative w-full h-[250px] mb-6 rounded-xl overflow-hidden"
+                    >
+                      <Image
+                        src={selectedCard.image || "/placeholder.svg"}
+                        alt={selectedCard.title}
+                        fill
+                        priority
+                        className="object-cover"
+                      />
+                      {/* White mask overlay */}
+                      <div className="absolute inset-0 bg-white/20"></div>
+                    </motion.div>
+
+                    {/* Text content */}
+                    <motion.h2
+                      layoutId={`title-${selectedCard.title}`}
+                      className="text-[38px]/[1.1] font-medium text-black mb-6"
+                    >
+                      {selectedCard.title}
+                    </motion.h2>
+
+                    <div className="space-y-6">
+                      <motion.div layoutId={`description-${selectedCard.title}`} className="hidden">
+                        {selectedCard.description.substring(0, 70)}
+                      </motion.div>
+
+                      {selectedCard.description.split("\n\n").map((paragraph, index) => (
+                        <p key={index} className="text-[18px]/[1.4] text-black">
+                          {paragraph}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                </ScrollArea>
+              </motion.div>
+            </div>
+          </div>
         )}
       </AnimatePresence>
     </section>
